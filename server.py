@@ -79,6 +79,28 @@ def get_payload(participant_id):
     return json.loads(row[0]) if row else None
 
 
+
+def valid_prediction_count(data):
+    """Count only fully populated probability reports, not preallocated/null trial slots."""
+    count = 0
+    for ans in (data.get('answers') or []):
+        if not isinstance(ans, dict):
+            continue
+        probs = ans.get('probs')
+        labels = ans.get('choice_labels')
+        if not isinstance(probs, list) or not isinstance(labels, list) or len(probs) != len(labels) or not probs:
+            continue
+        try:
+            vals = [float(x) for x in probs]
+        except (TypeError, ValueError):
+            continue
+        if any(x < 0 or x > 100 for x in vals):
+            continue
+        if abs(sum(vals) - 100.0) > 1e-6:
+            continue
+        count += 1
+    return count
+
 def submission_list():
     with db_connect() as con:
         rows = con.execute("SELECT participant_id, prolific_pid, study_id, session_id, status, started, finished, updated_at, data_json FROM submissions ORDER BY updated_at DESC").fetchall()
@@ -89,7 +111,7 @@ def submission_list():
             'participant_id': row[0], 'prolific_pid': row[1], 'study_id': row[2], 'session_id': row[3],
             'status': row[4], 'started': row[5], 'finished': row[6], 'updated_at': row[7],
             'consent_given': bool(data.get('consent_given')), 'consent_timestamp': data.get('consent_timestamp',''),
-            'predictions_completed': len(data.get('answers') or []),
+            'predictions_completed': valid_prediction_count(data),
             'ring_quiz_attempts': data.get('ring_quiz_attempts',0),
             'ring_quiz_passed': bool(data.get('ring_quiz_passed')),
             'failed_comprehension': bool(data.get('failed_comprehension')),
@@ -117,7 +139,7 @@ def summary_rows(payloads):
             'mapping_index':p.get('mapping_index',''), 'navi_type':m.get('Navi',''), 'rilo_type':m.get('Rilo',''), 'toma_type':m.get('Toma',''),
             'ring_quiz_attempts':p.get('ring_quiz_attempts',''), 'ring_quiz_passed':int(bool(p.get('ring_quiz_passed'))),
             'failed_comprehension':int(bool(p.get('failed_comprehension'))), 'opponent_quiz_attempts':p.get('opponent_quiz_attempts',''),
-            'predictions_completed':len(p.get('answers') or []), 'bonus_selected_trial':b.get('selected_trial',''),
+            'predictions_completed':valid_prediction_count(p), 'bonus_selected_trial':b.get('selected_trial',''),
             'bonus_score':b.get('score',''), 'bonus_won':int(bool(b.get('won'))) if b else '', 'bonus_amount':b.get('amount',''),
             'screen_times_json':json.dumps(p.get('screen_times') or {}, separators=(',',':')),
             'ring_quiz_history_json':json.dumps(p.get('ring_quiz_history') or [], separators=(',',':')),
@@ -209,7 +231,7 @@ class Handler(BaseHTTPRequestHandler):
             pid=(q.get('participant_id') or [''])[0]
             p=get_payload(pid) if pid else None
             if not p: return self.send_bytes(b'{"ok":false,"error":"not_found"}','application/json; charset=utf-8',status=404)
-            body=json.dumps({'ok':True,'participant_id':pid,'prolific_pid':p.get('prolific_pid',''),'study_id':p.get('study_id',''),'session_id':p.get('session_id',''),'status':p.get('status',''),'predictions_completed':len(p.get('answers') or []),'finished':p.get('finished') or ''},separators=(',',':')).encode('utf-8')
+            body=json.dumps({'ok':True,'participant_id':pid,'prolific_pid':p.get('prolific_pid',''),'study_id':p.get('study_id',''),'session_id':p.get('session_id',''),'status':p.get('status',''),'predictions_completed':valid_prediction_count(p),'finished':p.get('finished') or ''},separators=(',',':')).encode('utf-8')
             return self.send_bytes(body,'application/json; charset=utf-8')
         if u.path=='/healthz':
             return self.send_bytes(b'ok')
@@ -235,7 +257,7 @@ class Handler(BaseHTTPRequestHandler):
             if n<=0 or n>MAX_BODY: raise ValueError('invalid body size')
             payload=json.loads(self.rfile.read(n).decode('utf-8'))
             upsert(payload)
-            reply={'ok':True,'participant_id':payload.get('participant_id',''),'prolific_pid':payload.get('prolific_pid',''),'study_id':payload.get('study_id',''),'session_id':payload.get('session_id',''),'status':payload.get('status',''),'predictions_completed':len(payload.get('answers') or [])}
+            reply={'ok':True,'participant_id':payload.get('participant_id',''),'prolific_pid':payload.get('prolific_pid',''),'study_id':payload.get('study_id',''),'session_id':payload.get('session_id',''),'status':payload.get('status',''),'predictions_completed':valid_prediction_count(payload)}
             return self.send_bytes(json.dumps(reply,separators=(',',':')).encode('utf-8'),'application/json; charset=utf-8')
         except Exception as e:
             print('SAVE ERROR:',repr(e),flush=True)
