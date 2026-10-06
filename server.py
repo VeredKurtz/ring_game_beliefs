@@ -88,6 +88,7 @@ def submission_list():
         out.append({
             'participant_id': row[0], 'prolific_pid': row[1], 'study_id': row[2], 'session_id': row[3],
             'status': row[4], 'started': row[5], 'finished': row[6], 'updated_at': row[7],
+            'consent_given': bool(data.get('consent_given')), 'consent_timestamp': data.get('consent_timestamp',''),
             'predictions_completed': len(data.get('answers') or []),
             'ring_quiz_attempts': data.get('ring_quiz_attempts',0),
             'ring_quiz_passed': bool(data.get('ring_quiz_passed')),
@@ -111,6 +112,7 @@ def summary_rows(payloads):
         out.append({
             'participant_id':p.get('participant_id',''), 'prolific_pid':p.get('prolific_pid',''),
             'study_id':p.get('study_id',''), 'session_id':p.get('session_id',''), 'status':p.get('status',''),
+            'consent_given':int(bool(p.get('consent_given'))), 'consent_timestamp':p.get('consent_timestamp',''),
             'started':p.get('started',''), 'finished':p.get('finished',''),
             'mapping_index':p.get('mapping_index',''), 'navi_type':m.get('Navi',''), 'rilo_type':m.get('Rilo',''), 'toma_type':m.get('Toma',''),
             'ring_quiz_attempts':p.get('ring_quiz_attempts',''), 'ring_quiz_passed':int(bool(p.get('ring_quiz_passed'))),
@@ -192,7 +194,7 @@ class Handler(BaseHTTPRequestHandler):
             rows=submission_list()
             esc=lambda x: str(x).replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('\"','&quot;')
             trs=''.join(
-                '<tr>'+''.join(f'<td>{esc(r.get(k,""))}</td>' for k in ['participant_id','prolific_pid','study_id','session_id','status','predictions_completed','ring_quiz_attempts','ring_quiz_passed','failed_comprehension','bonus_won','updated_at'])+'</tr>'
+                '<tr>'+''.join(f'<td>{esc(r.get(k,""))}</td>' for k in ['participant_id','prolific_pid','study_id','session_id','status','consent_given','predictions_completed','ring_quiz_attempts','ring_quiz_passed','failed_comprehension','bonus_won','updated_at'])+'</tr>'
                 for r in rows
             ) or '<tr><td colspan=11>No submissions saved yet.</td></tr>'
             html=f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ring Game Researcher Dashboard</title>
@@ -200,7 +202,7 @@ class Handler(BaseHTTPRequestHandler):
             <h1>Ring Game researcher dashboard</h1><p>This page reads the <strong>server database</strong>. Opening it does not create a participant record.</p>
             <div class="links"><a href="/admin/export/summary.csv?token={token}">Download summary CSV</a><a href="/admin/export/trials.csv?token={token}">Download trials CSV</a><a href="/admin/export/raw.json?token={token}">Download raw JSON</a></div>
             <p>Saved submissions: <strong>{len(rows)}</strong></p>
-            <table><thead><tr>{''.join(f'<th>{h}</th>' for h in ['participant_id','prolific_pid','study_id','session_id','status','predictions','quiz attempts','quiz passed','screened out','bonus won','updated'])}</tr></thead><tbody>{trs}</tbody></table>
+            <table><thead><tr>{''.join(f'<th>{h}</th>' for h in ['participant_id','prolific_pid','study_id','session_id','status','consent','predictions','quiz attempts','quiz passed','screened out','bonus won','updated'])}</tr></thead><tbody>{trs}</tbody></table>
             </body></html>'''
             return self.send_bytes(html.encode('utf-8'),'text/html; charset=utf-8')
         if u.path=='/api/verify':

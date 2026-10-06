@@ -38,3 +38,9 @@ Open participant view:
 
 Open researcher view:
 `http://127.0.0.1:8000/researcher?token=test-secret`
+
+## v3 consent update
+- The ethics-approved informed-consent form is now the first participant-facing screen.
+- No server-side research record is created before affirmative consent.
+- Participants who decline consent are shown an exit message and no data are sent to the server.
+- Affirmative consent and its timestamp are included in server exports.
