@@ -73,6 +73,30 @@ def upsert(payload):
               data_json=excluded.data_json''', row)
 
 
+def get_payload(participant_id):
+    with db_connect() as con:
+        row = con.execute("SELECT data_json FROM submissions WHERE participant_id=?", (participant_id,)).fetchone()
+    return json.loads(row[0]) if row else None
+
+
+def submission_list():
+    with db_connect() as con:
+        rows = con.execute("SELECT participant_id, prolific_pid, study_id, session_id, status, started, finished, updated_at, data_json FROM submissions ORDER BY updated_at DESC").fetchall()
+    out=[]
+    for row in rows:
+        data=json.loads(row[8])
+        out.append({
+            'participant_id': row[0], 'prolific_pid': row[1], 'study_id': row[2], 'session_id': row[3],
+            'status': row[4], 'started': row[5], 'finished': row[6], 'updated_at': row[7],
+            'predictions_completed': len(data.get('answers') or []),
+            'ring_quiz_attempts': data.get('ring_quiz_attempts',0),
+            'ring_quiz_passed': bool(data.get('ring_quiz_passed')),
+            'failed_comprehension': bool(data.get('failed_comprehension')),
+            'bonus_won': (data.get('bonus') or {}).get('won','')
+        })
+    return out
+
+
 def all_payloads():
     with db_connect() as con:
         rows = con.execute('SELECT data_json FROM submissions ORDER BY updated_at').fetchall()
@@ -164,8 +188,27 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_bytes(body,'text/html; charset=utf-8')
         if u.path=='/researcher':
             if not authorized(q): return self.send_bytes(b'Forbidden',status=403)
-            injected=INDEX.replace('<script>', '<script>window.__RESEARCHER_MODE__=true;</script><script>', 1)
-            return self.send_bytes(injected.encode('utf-8'),'text/html; charset=utf-8')
+            token=(q.get('token') or [''])[0]
+            rows=submission_list()
+            esc=lambda x: str(x).replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('\"','&quot;')
+            trs=''.join(
+                '<tr>'+''.join(f'<td>{esc(r.get(k,""))}</td>' for k in ['participant_id','prolific_pid','study_id','session_id','status','predictions_completed','ring_quiz_attempts','ring_quiz_passed','failed_comprehension','bonus_won','updated_at'])+'</tr>'
+                for r in rows
+            ) or '<tr><td colspan=11>No submissions saved yet.</td></tr>'
+            html=f'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ring Game Researcher Dashboard</title>
+            <style>body{{font-family:system-ui,-apple-system,sans-serif;margin:30px;color:#1f2937}}a{{color:#1455c0}}table{{border-collapse:collapse;width:100%;font-size:12px;margin-top:20px}}th,td{{border:1px solid #d1d5db;padding:6px;vertical-align:top}}th{{background:#f3f4f6;position:sticky;top:0}}.links a{{margin-right:18px}}code{{background:#f3f4f6;padding:2px 4px}}</style></head><body>
+            <h1>Ring Game researcher dashboard</h1><p>This page reads the <strong>server database</strong>. Opening it does not create a participant record.</p>
+            <div class="links"><a href="/admin/export/summary.csv?token={token}">Download summary CSV</a><a href="/admin/export/trials.csv?token={token}">Download trials CSV</a><a href="/admin/export/raw.json?token={token}">Download raw JSON</a></div>
+            <p>Saved submissions: <strong>{len(rows)}</strong></p>
+            <table><thead><tr>{''.join(f'<th>{h}</th>' for h in ['participant_id','prolific_pid','study_id','session_id','status','predictions','quiz attempts','quiz passed','screened out','bonus won','updated'])}</tr></thead><tbody>{trs}</tbody></table>
+            </body></html>'''
+            return self.send_bytes(html.encode('utf-8'),'text/html; charset=utf-8')
+        if u.path=='/api/verify':
+            pid=(q.get('participant_id') or [''])[0]
+            p=get_payload(pid) if pid else None
+            if not p: return self.send_bytes(b'{"ok":false,"error":"not_found"}','application/json; charset=utf-8',status=404)
+            body=json.dumps({'ok':True,'participant_id':pid,'prolific_pid':p.get('prolific_pid',''),'study_id':p.get('study_id',''),'session_id':p.get('session_id',''),'status':p.get('status',''),'predictions_completed':len(p.get('answers') or []),'finished':p.get('finished') or ''},separators=(',',':')).encode('utf-8')
+            return self.send_bytes(body,'application/json; charset=utf-8')
         if u.path=='/healthz':
             return self.send_bytes(b'ok')
         if u.path.startswith('/admin/export/'):
@@ -190,7 +233,8 @@ class Handler(BaseHTTPRequestHandler):
             if n<=0 or n>MAX_BODY: raise ValueError('invalid body size')
             payload=json.loads(self.rfile.read(n).decode('utf-8'))
             upsert(payload)
-            return self.send_bytes(b'{"ok":true}','application/json; charset=utf-8')
+            reply={'ok':True,'participant_id':payload.get('participant_id',''),'prolific_pid':payload.get('prolific_pid',''),'study_id':payload.get('study_id',''),'session_id':payload.get('session_id',''),'status':payload.get('status',''),'predictions_completed':len(payload.get('answers') or [])}
+            return self.send_bytes(json.dumps(reply,separators=(',',':')).encode('utf-8'),'application/json; charset=utf-8')
         except Exception as e:
             print('SAVE ERROR:',repr(e),flush=True)
             return self.send_bytes(b'{"ok":false}','application/json; charset=utf-8',status=400)
