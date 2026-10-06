@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ring Game Opponent-Belief Pilot</title>
+<style>
+:root{--ink:#222;--muted:#666;--line:#bbb;--panel:#fff;--bg:#f7f7f7;--accent:#205493;--warn:#9c1c1c;--ok:#2e7d32}
+*{box-sizing:border-box}
+body{max-width:1280px;margin:0 auto;padding:22px;font-family:Arial,Helvetica,sans-serif;color:var(--ink);background:var(--bg)}
+.screen{display:none;background:var(--panel);padding:28px 34px;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.08);margin-bottom:28px}.screen.active{display:block}
+.nav{display:flex;justify-content:space-between;gap:12px;margin-top:24px}.btn{padding:10px 18px;border:0;border-radius:7px;background:var(--accent);color:white;font-size:16px;cursor:pointer}.btn.secondary{background:#666}.btn.good{background:var(--ok)}.btn:disabled{opacity:.45;cursor:not-allowed}
+.error{display:none;color:var(--warn);background:#fdeaea;padding:10px;border-radius:6px;margin:12px 0}.note{background:#eef5fb;border-left:4px solid var(--accent);padding:12px 14px;margin:14px 0}.small{font-size:14px;color:var(--muted)}
+.progress{height:8px;background:#ddd;border-radius:5px;overflow:hidden;margin-bottom:18px}.progress>div{height:100%;background:var(--accent);width:0}
+.payoff-row{display:flex;flex-wrap:nowrap;gap:14px;margin:18px 0;overflow-x:auto;align-items:flex-start;padding-bottom:6px}.payoff-card{flex:1 1 0;min-width:220px;padding:12px;border:2px solid #ccc;border-radius:9px;background:#fafafa}.payoff-card.target{border-color:#111;box-shadow:0 0 0 1px #111 inset}.payoff-card h4{margin:0 0 8px}.matrix-wrap{display:grid;grid-template-columns:max-content minmax(0,1fr);column-gap:7px;align-items:stretch}.row-owner{display:flex;flex-direction:column;justify-content:center;align-items:flex-end;font-size:12px;color:#444;font-weight:bold;line-height:1.15;white-space:nowrap;padding-top:21px}.table-region{min-width:0}.col-owner{text-align:center;font-size:13px;color:#444;font-weight:bold;margin:0 0 4px 38px}.payoff-table{border-collapse:collapse;width:100%;background:#fff;table-layout:fixed}.payoff-table th,.payoff-table td{border:1px solid #777;padding:7px;text-align:center;white-space:nowrap}.payoff-table th:first-child,.row-label{width:38px}.row-label{font-weight:bold;background:#f5f5f5}.highlight-row td{background:#fff3cd}.highlight-row .row-label{background:#ffe69c}.highlight-col{background:#dbeafe!important}.intersection{background:#9ec5fe!important;font-weight:bold;box-shadow:inset 0 0 0 2px #205493}.legend-row{display:flex;gap:14px;align-items:center;font-size:13px;margin:8px 0 0}.swatch{display:inline-block;width:16px;height:16px;border:1px solid #888;vertical-align:middle;margin-right:4px}.swatch.row{background:#fff3cd}.swatch.col{background:#dbeafe}.swatch.int{background:#9ec5fe}
+.opponent-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}.opponent-card{border:1px solid var(--line);border-radius:10px;padding:16px;background:#fff}.opponent-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}.opponent-head h3{margin:0}.opicon{width:46px;height:46px;flex:0 0 46px}.op-tag{font-size:14px;color:#444;font-style:italic;margin-top:2px}
+.op-reminder{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid #bbb;border-radius:9px;background:#fbfbfb;margin:10px 0 18px}.op-reminder .name{font-weight:bold;font-size:18px}.op-reminder .tag{font-size:14px;color:#444}
+.prob-grid{display:grid;grid-template-columns:110px 170px;gap:8px 12px;align-items:center}.prob-input{width:95px;padding:6px}.total-box{margin-top:10px;font-weight:bold}.answer{display:block;margin:8px 0;padding:6px}.screen h2{margin-top:0}
+.example-choice{background:#f8f8f8;border:1px solid #ddd;border-radius:8px;padding:12px 14px;margin:12px 0}
+.debug-panel{display:none;position:fixed;right:10px;bottom:10px;width:390px;max-height:70vh;overflow:auto;background:#fff;border:2px solid #333;border-radius:10px;padding:12px;z-index:9999;box-shadow:0 2px 10px rgba(0,0,0,.2);font-size:12px}.debug-panel.active{display:block}.debug-panel h3{margin:0 0 8px}.debug-panel table{border-collapse:collapse;width:100%;font-size:11px}.debug-panel td,.debug-panel th{border:1px solid #ccc;padding:4px;text-align:left}.debug-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.debug-actions button{font-size:11px;padding:5px 7px}
+@media(max-width:900px){.opponent-grid{grid-template-columns:1fr}.debug-panel{width:95%;right:2.5%}.payoff-card{min-width:240px}}
+</style>
+</head>
+<body>
+<div class="progress"><div id="progressBar"></div></div>
+<div id="app"></div>
+<div id="debugPanel" class="debug-panel"></div>
+<script>
+const NAMES=['Navi','Rilo','Toma'];
+const TYPES=['two_player','two_choice','max'];
+const TYPE_LABELS={two_player:'two-player solver',two_choice:'two-choice solver',max:'highest-payoff rule'};
+const DEBUG=window.__RESEARCHER_MODE__===true;
+
+const ICONS={
+ Navi:`<svg class="opicon" viewBox="0 0 60 60" aria-hidden="true"><rect x="7" y="7" width="46" height="46" rx="10" fill="none" stroke="#333" stroke-width="3"/><circle cx="22" cy="25" r="4" fill="#333"/><circle cx="38" cy="25" r="4" fill="#333"/><path d="M20 39 Q30 46 40 39" fill="none" stroke="#333" stroke-width="3"/></svg>`,
+ Rilo:`<svg class="opicon" viewBox="0 0 60 60" aria-hidden="true"><circle cx="30" cy="30" r="23" fill="none" stroke="#333" stroke-width="3"/><rect x="16" y="19" width="28" height="22" rx="5" fill="none" stroke="#333" stroke-width="3"/><circle cx="23" cy="30" r="3" fill="#333"/><circle cx="37" cy="30" r="3" fill="#333"/></svg>`,
+ Toma:`<svg class="opicon" viewBox="0 0 60 60" aria-hidden="true"><path d="M30 6 L54 50 H6 Z" fill="none" stroke="#333" stroke-width="3" stroke-linejoin="round"/><circle cx="24" cy="31" r="3" fill="#333"/><circle cx="36" cy="31" r="3" fill="#333"/><path d="M22 40 H38" stroke="#333" stroke-width="3"/></svg>`
+};
+
+const scenarios={
+ simple_l2:{title:'Simple game: two players, two choice options each',game_class:'simple',ring_id:'Ring #2, variation 1',target_role:'Player 1',role_level:'L2',choice_labels:['i','j'],sophisticated_choice:'i',max_choice:'j',players:[
+  {name:'Player 1',rows:[['i',[8,12]],['j',[13,7]]],columns:['m','n']},
+  {name:'Player 2',rows:[['m',[5,7]],['n',[8,16]]],columns:['i','j']}]},
+ large_options_l2:{title:'Two-player game with many choice options',game_class:'large_options',ring_id:'New 2-player, 4-choice-option ring',target_role:'Player 1',role_level:'L2',choice_labels:['i','j','k','l'],sophisticated_choice:'j',max_choice:'i',players:[
+  {name:'Player 1',rows:[['i',[6,9,11,14]],['j',[9,13,7,11]],['k',[10,8,12,10]],['l',[11,12,10,9]]],columns:['m','n','o','p']},
+  {name:'Player 2',rows:[['m',[3,7,9,5]],['n',[11,13,14,10]],['o',[2,10,3,9]],['p',[0,12,4,8]]],columns:['i','j','k','l']}]},
+ multi_player_l4:{title:'Game with multiple players and two choice options each',game_class:'multi_player',ring_id:'Ring #20, variation 1',target_role:'Player 1',role_level:'L4',choice_labels:['a','b'],sophisticated_choice:'a',max_choice:'b',players:[
+  {name:'Player 1',rows:[['a',[13,7]],['b',[1,19]]],columns:['e','f']},
+  {name:'Player 2',rows:[['e',[2,18]],['f',[9,11]]],columns:['i','j']},
+  {name:'Player 3',rows:[['i',[15,5]],['j',[12,8]]],columns:['m','n']},
+  {name:'Player 4',rows:[['m',[5,7]],['n',[13,11]]],columns:['a','b']}]},
+ multi_player_l2:{title:'Game with multiple players and two choice options each',game_class:'multi_player',ring_id:'Ring #20, variation 1',target_role:'Player 3',role_level:'L2',choice_labels:['i','j'],sophisticated_choice:'j',max_choice:'i',players:[
+  {name:'Player 1',rows:[['a',[13,7]],['b',[1,19]]],columns:['e','f']},
+  {name:'Player 2',rows:[['e',[2,18]],['f',[9,11]]],columns:['i','j']},
+  {name:'Player 3',rows:[['i',[15,5]],['j',[12,8]]],columns:['m','n']},
+  {name:'Player 4',rows:[['m',[5,7]],['n',[13,11]]],columns:['a','b']}]}
+};
+
+const twoPlayerExample={players:[
+ {name:'Player 1',rows:[['i',[5,3,10]],['j',[10,11,4]],['k',[12,9,6]]],columns:['m','n','o']},
+ {name:'Player 2',rows:[['m',[6,13,4]],['n',[8,5,14]],['o',[12,9,6]]],columns:['i','j','k']} ]};
+
+const threePlayerExample={players:[
+ {name:'Player 1',rows:[['a',[9,4]],['b',[6,12]]],columns:['e','f']},
+ {name:'Player 2',rows:[['e',[8,5]],['f',[3,11]]],columns:['i','j']},
+ {name:'Player 3',rows:[['i',[7,10]],['j',[13,2]]],columns:['a','b']} ]};
+
+let state={
+ participant_id:crypto.randomUUID?crypto.randomUUID():('p_'+Date.now()+'_'+Math.random().toString(36).slice(2)),
+ screen:0,mapping:null,mapping_index:null,trials:[],answers:[],prolific_pid:'',study_id:'',session_id:'',bonus:null,
+ ring_quiz_attempts:0,ring_quiz_passed:false,ring_quiz_history:[],opponent_quiz_attempts:0,opponent_quiz_history:[],
+ failed_comprehension:false,started:new Date().toISOString(),finished:null,screen_times:{},screen_entered_at:Date.now()
+};
+
+function shuffle(a){a=[...a];for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+function chooseMapping(){const perms=[[0,1,2],[0,2,1],[1,0,2],[1,2,0],[2,0,1],[2,1,0]];const idx=Math.floor(Math.random()*perms.length),p=perms[idx];let m={};NAMES.forEach((n,i)=>m[n]=TYPES[p[i]]);state.mapping_index=idx+1;return m}
+function typeToName(type){return NAMES.find(n=>state.mapping[n]===type)}
+function validOrder(o){for(let i=0;i<o.length-1;i++)if(o[i].scenario===o[i+1].scenario)return false;for(let i=0;i<o.length-2;i++)if(o[i].type===o[i+1].type&&o[i].type===o[i+2].type)return false;return true}
+function makeTrials(){let t=[];Object.keys(scenarios).forEach(s=>TYPES.forEach(type=>t.push({scenario:s,type})));for(let k=0;k<10000;k++){let x=shuffle(t);if(validOrder(x))return x}return shuffle(t)}
+function recordScreenTime(){const key=`screen_${state.screen}`;const sec=(Date.now()-state.screen_entered_at)/1000;state.screen_times[key]=(state.screen_times[key]||0)+sec;state.screen_entered_at=Date.now()}
+function setScreen(n){recordScreenTime();state.screen=n;render()}
+function next(){setScreen(state.screen+1)}
+function back(){setScreen(Math.max(0,state.screen-1))}
+
+function matrixHTML(p,colOwner,highlight=null){let colIdx=highlight? p.columns.indexOf(highlight.col):-1;let rows=p.rows.map((r)=>{let isRow=highlight&&r[0]===highlight.row;return `<tr class="${isRow?'highlight-row':''}"><td class="row-label">${r[0]}</td>${r[1].map((v,j)=>`<td class="${j===colIdx?'highlight-col':''} ${isRow&&j===colIdx?'intersection':''}">${v}</td>`).join('')}</tr>`}).join('');return `<div class="matrix-wrap"><div class="row-owner"><span>${p.name}'s</span><span>choice options</span></div><div class="table-region"><div class="col-owner">${colOwner}'s choice options</div><table class="payoff-table"><tr><th></th>${p.columns.map((c,j)=>`<th class="${j===colIdx?'highlight-col':''}">${c}</th>`).join('')}</tr>${rows}</table></div></div>`}
+function payoffTables(players,target,highlights={}){return `<div class="payoff-row">${players.map((p,i)=>{let colOwner=players[(i+1)%players.length].name;return `<div class="payoff-card ${p.name===target?'target':''}"><h4>${p.name}'s payoffs${p.name===target?' — prediction target':''}</h4>${matrixHTML(p,colOwner,highlights[p.name]||null)}</div>`}).join('')}</div>`}
+function tagForType(type){if(type==='two_player')return 'Solves two-player games. Otherwise, chooses at random.';if(type==='two_choice')return 'Solves games with two choice options per player. Otherwise, chooses at random.';return 'Chooses the choice option containing its highest possible payoff.'}
+function opponentCard(name,type){let body='';if(type==='two_player')body=`${name} is programmed to solve games with <strong>two players</strong>. This includes both simple games with two choice options and games with many choice options. In games with more than two players, ${name} is not programmed to solve the game and chooses randomly among its choice options.`;else if(type==='two_choice')body=`${name} is programmed to solve games with <strong>two choice options for each player</strong>. This includes both simple two-player games and games with multiple players. In games with more than two choice options, ${name} is not programmed to solve the game and chooses randomly among its choice options.`;else body=`${name} is programmed differently. ${name} does not solve the game. Instead, ${name} looks only at its own payoff table and chooses the choice option containing the <strong>highest possible payoff</strong> in that table. ${name} follows this rule in every game.`;return `<div class="opponent-card"><div class="opponent-head">${ICONS[name]}<div><h3>${name}</h3><div class="op-tag">${tagForType(type)}</div></div></div><p>${body}</p></div>`}
+function opponentReminder(name,type){return `<div class="op-reminder">${ICONS[name]}<div><div class="name">${name}</div><div class="tag">${tagForType(type)}</div></div></div>`}
+
+const SUCCESS_REDIRECT='https://app.prolific.com/submissions/complete?cc=CELC7P0O';
+const SCREENOUT_REDIRECT='https://app.prolific.com/submissions/complete?cc=CD7I6NVT';
+
+async function saveToServer(status='in_progress'){
+  const payload={...state,status};
+  const r=await fetch('/api/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  if(!r.ok){throw new Error(`Server save failed (${r.status})`)}
+  return await r.json();
+}
+async function saveCheckpoint(status='in_progress'){
+  try{await saveToServer(status);return true}catch(err){console.error(err);return false}
+}
+async function saveAndRedirect(status,url){
+  const app=document.getElementById('app');
+  app.innerHTML=`<section class="screen active"><h2>Saving your responses...</h2><p>Please keep this window open for a moment.</p><div id="saveErr" class="error"></div></section>`;
+  try{
+    await saveToServer(status);
+    window.location.href=url;
+  }catch(err){
+    const e=document.getElementById('saveErr');
+    e.style.display='block';
+    e.innerHTML='We could not save your responses. Please check your internet connection and <button class="btn" onclick="saveAndRedirect(\''+status+'\',\''+url+'\')">try again</button>.';
+  }
+}
+
+function render(){
+ const app=document.getElementById('app');
+ const total=11+state.trials.length;
+ document.getElementById('progressBar').style.width=`${Math.min(100,100*state.screen/(total-1))}%`;
+ let html='';
+ if(state.screen===0)html=startScreen();
+ else if(state.screen===1)html=instruction1();
+ else if(state.screen===2)html=instruction2();
+ else if(state.screen===3)html=instruction3();
+ else if(state.screen===4)html=instruction4();
+ else if(state.screen===5)html=ringQuiz();
+ else if(state.screen===6)html=opponentIntro();
+ else if(state.screen===7)html=opponentQuiz();
+ else if(state.screen===8)html=bonusExplain();
+ else if(state.screen>=9 && state.screen<21)html=beliefScreen(state.screen-9);
+ else if(state.screen===21)html=bonusScreen();
+ else if(state.screen===22)html=finishScreen();
+ else if(state.screen===90)html=failedScreen();
+ app.innerHTML=html; updateDebug();
+}
+
+function startScreen(){return `<section class="screen active"><h2>Decision-making study</h2><p>Thank you for taking part in this study. You will first learn how the decision problems work and then make a series of predictions about computer opponents.</p><p>Your base payment is provided through Prolific. You can also earn an additional <strong>$2 bonus</strong> based on the accuracy of one randomly selected prediction.</p><p class="small">Please complete the study on a desktop or laptop computer. The study is self-paced.</p><div class="nav"><span></span><button class="btn" onclick="next()">Continue</button></div></section>`}
+function instruction1(){let h={'Player 1':{row:'j',col:'m'}};return `<section class="screen active"><h2>1. How to read a payoff table</h2><p>In each game, every player chooses one of several <strong>choice options</strong>. A player's own choice option determines the <strong>row</strong> of that player's payoff table. The choice of the player named above the columns determines the <strong>column</strong>.</p><p>Consider Player 1's payoff table below. Player 1 can choose <strong>i, j, or k</strong>, and Player 2 can choose <strong>m, n, or o</strong>.</p>${`<div class="payoff-row"><div class="payoff-card"><h4>Player 1's payoffs</h4>${matrixHTML(twoPlayerExample.players[0],'Player 2',h['Player 1'])}</div></div>`}<div class="example-choice"><strong>Example:</strong> suppose Player 1 chooses <strong>j</strong> and Player 2 chooses <strong>m</strong>. Player 1's choice selects row <strong>j</strong>, and Player 2's choice selects column <strong>m</strong>. The highlighted row and column intersect at <strong>10</strong>, so Player 1 receives a payoff of <strong>10</strong>.</div><div class="legend-row"><span><span class="swatch row"></span>chosen row</span><span><span class="swatch col"></span>chosen column</span><span><span class="swatch int"></span>payoff</span></div><p>The labels next to the rows and above the columns will always tell you whose choice determines each part of the table.</p><div class="nav"><button class="btn secondary" onclick="back()">Back</button><button class="btn" onclick="next()">Continue</button></div></section>`}
+function instruction2(){let h={'Player 1':{row:'j',col:'m'},'Player 2':{row:'m',col:'j'}};return `<section class="screen active"><h2>2. A two-player game</h2><p>Now consider the complete two-player game. Player 1's payoffs are shown in the first table, and Player 2's payoffs are shown in the second table.</p>${payoffTables(twoPlayerExample.players,null,h)}<div class="example-choice"><strong>Example:</strong> suppose Player 1 chooses <strong>j</strong> and Player 2 chooses <strong>m</strong>. Player 1's payoff is the number where row <strong>j</strong> and column <strong>m</strong> meet: <strong>10</strong>. Player 2's payoff is found in Player 2's own table, where row <strong>m</strong> and column <strong>j</strong> meet: <strong>13</strong>.</div><p>Thus, the same pair of choices determines both players' payoffs, but each player's payoff is read from that player's own table.</p><div class="nav"><button class="btn secondary" onclick="back()">Back</button><button class="btn" onclick="next()">Continue</button></div></section>`}
+function instruction3(){let h={'Player 1':{row:'b',col:'f'},'Player 2':{row:'f',col:'i'},'Player 3':{row:'i',col:'b'}};return `<section class="screen active"><h2>3. A three-player game</h2><p>Games can also contain more than two players. In the three-player game below, each player chooses one choice option.</p><p><strong>Player 1's payoff</strong> depends upon the row Player 1 chooses and the row Player 2 chooses. <strong>Player 2's payoff</strong> depends upon the row Player 2 chooses and the row Player 3 chooses. <strong>Player 3's payoff</strong> depends upon the row Player 3 chooses and the row Player 1 chooses.</p>${payoffTables(threePlayerExample.players,null,h)}<div class="example-choice"><strong>Example:</strong> suppose Player 1 chooses <strong>b</strong>, Player 2 chooses <strong>f</strong>, and Player 3 chooses <strong>i</strong>. Player 1 receives <strong>12</strong>, Player 2 receives <strong>3</strong>, and Player 3 receives <strong>10</strong>. The highlighted row and column in each table show how each payoff is determined.</div><p>In every game, the labels beside the rows and above the columns show exactly which players' choices determine the payoff in that table.</p><div class="nav"><button class="btn secondary" onclick="back()">Back</button><button class="btn" onclick="next()">Continue</button></div></section>`}
+function instruction4(){return `<section class="screen active"><h2>4. What can vary across games</h2><p>Across the study, games may differ in:</p><ul><li>the <strong>number of players</strong>; and</li><li>the <strong>number of choice options</strong> available to each player.</li></ul><p>Before every prediction, you will see all payoff tables for that game at the same time. The player whose choice you are predicting will be clearly indicated.</p><p>The study is self-paced: take the time you need to inspect each game before answering.</p><div class="nav"><button class="btn secondary" onclick="back()">Back</button><button class="btn" onclick="next()">Continue</button></div></section>`}
+
+function ringQuiz(){let attempt=state.ring_quiz_attempts+1;return `<section class="screen active"><h2>Quick comprehension check</h2><div id="err" class="error"></div><p>Please answer these questions about the three-player game below. You have up to <strong>two attempts</strong> to pass this check.</p>${payoffTables(threePlayerExample.players,null)}<p><strong>1.</strong> Player 2's payoff depends on Player 2's choice option and the choice option selected by which player?</p>${['Player 1','Player 2','Player 3'].map(v=>`<label class="answer"><input type="radio" name="c1" value="${v}"> ${v}</label>`).join('')}<p><strong>2.</strong> Suppose Player 2 chooses <strong>f</strong> and Player 3 chooses <strong>i</strong>. What is Player 2's payoff?</p>${['3','8','11'].map(v=>`<label class="answer"><input type="radio" name="c2" value="${v}"> ${v}</label>`).join('')}<p><strong>3.</strong> Suppose Player 3 chooses <strong>i</strong>. Which choice option gives Player 2 the highest payoff?</p>${['e','f'].map(v=>`<label class="answer"><input type="radio" name="c3" value="${v}"> ${v}</label>`).join('')}<p class="small">Attempt ${attempt} of 2</p><div class="nav"><button class="btn secondary" onclick="back()">Back</button><button class="btn" onclick="checkRingQuiz()">Check answers</button></div></section>`}
+async function checkRingQuiz(){const g=n=>document.querySelector(`input[name=${n}]:checked`)?.value;const resp={attempt:state.ring_quiz_attempts+1,c1:g('c1')||'',c2:g('c2')||'',c3:g('c3')||'',time:new Date().toISOString()};const ok=resp.c1==='Player 3'&&resp.c2==='3'&&resp.c3==='e';resp.passed=ok;state.ring_quiz_history.push(resp);state.ring_quiz_attempts++;
+ if(ok){state.ring_quiz_passed=true;await saveCheckpoint('in_progress');next();return}
+ if(state.ring_quiz_attempts>=2){state.failed_comprehension=true;state.finished=new Date().toISOString();await saveAndRedirect('screened_out',SCREENOUT_REDIRECT);return}
+ let e=document.getElementById('err');e.innerHTML='At least one answer is incorrect. Please review how payoffs are read from the tables, then try once more.';e.style.display='block';
+}
+
+function opponentIntro(){return `<section class="screen active"><h2>The computer opponents</h2><p>In the next part of the study, you will be asked to predict choices made by three computer opponents. Each opponent follows a fixed program. The program does not change during the study.</p><p>Please read carefully how each opponent is programmed. You will later earn a bonus based on the accuracy of your predictions.</p><div class="opponent-grid">${NAMES.map(n=>opponentCard(n,state.mapping[n])).join('')}</div><div class="nav"><button class="btn secondary" onclick="back()">Back</button><button class="btn" onclick="next()">Continue</button></div></section>`}
+
+function opponentQuiz(){let tp=typeToName('two_player'),tc=typeToName('two_choice'),mx=typeToName('max');const q=(num,name,txt)=>`<div class="op-reminder">${ICONS[name]}<div><div class="name">${name}</div><div class="tag">${tagForType(state.mapping[name])}</div></div></div><p><strong>${num}.</strong> ${name} ${txt}</p><label class="answer"><input type="radio" name="oc${num}" value="solve"> ${name} is programmed to solve the game.</label><label class="answer"><input type="radio" name="oc${num}" value="random"> ${name} chooses randomly among its choice options.</label><label class="answer"><input type="radio" name="oc${num}" value="max"> ${name} chooses the choice option containing the highest possible payoff in its own payoff table.</label>`;return `<section class="screen active"><h2>Quick check about the opponents</h2><div id="err" class="error"></div>${q(1,tp,'is playing a game with two players and four choice options for each player. How is '+tp+' programmed to choose?')}${q(2,tc,'is playing a game with four players and two choice options for each player. How is '+tc+' programmed to choose?')}${q(3,mx,'is playing a game with four players and two choice options for each player. How is '+mx+' programmed to choose?')}<div class="nav"><button class="btn secondary" onclick="back()">Back</button><button class="btn" onclick="checkOpponentQuiz()">Check answers</button></div></section>`}
+
+async function checkOpponentQuiz(){const g=n=>document.querySelector(`input[name=oc${n}]:checked`)?.value;const resp={attempt:state.opponent_quiz_attempts+1,q1:g(1)||'',q2:g(2)||'',q3:g(3)||'',time:new Date().toISOString()};const ok=resp.q1==='solve'&&resp.q2==='solve'&&resp.q3==='max';resp.passed=ok;state.opponent_quiz_history.push(resp);state.opponent_quiz_attempts++;if(ok){await saveCheckpoint('in_progress');next();return}let e=document.getElementById('err');e.textContent='At least one answer is incorrect. Please review how the three opponents are programmed and try again.';e.style.display='block'}
+
+function bonusExplain(){return `<section class="screen active"><h2>How your bonus works</h2><p>On each prediction question, you will assign probabilities to the opponent's possible choice options. Your probabilities must add up to <strong>100%</strong>.</p><p>At the end of the study, <strong>one of your 12 prediction questions will be selected at random</strong>. The computer will determine what the opponent chose according to that opponent's program.</p><p>Your probability report on the selected question will be converted, using a standard scoring rule, into your chance of receiving an additional <strong>$2 bonus</strong>. <strong>You do not need to calculate the scoring rule yourself.</strong> The rule is designed so that your best strategy is to report your beliefs as accurately as possible.</p><div class="example-choice"><strong>Example 1.</strong> Suppose you think Choice A is very likely and report <strong>80% for A and 20% for B</strong>. If the opponent chooses A, this is a relatively accurate prediction and gives you a <strong>high chance</strong> of receiving the $2 bonus.</div><div class="example-choice"><strong>Example 2.</strong> Suppose you are genuinely uncertain and report <strong>50% for A and 50% for B</strong>. If the opponent chooses A, you can still receive the $2 bonus, but your chance is lower than in Example 1 because your prediction placed less probability on the choice that occurred.</div><p>You will not receive feedback until all 12 predictions are complete.</p><div class="nav"><button class="btn secondary" onclick="back()">Back</button><button class="btn" onclick="next()">Begin predictions</button></div></section>`}
+function beliefScreen(idx){let t=state.trials[idx],s=scenarios[t.scenario],name=typeToName(t.type),prev=state.answers[idx];return `<section class="screen active"><h2>Prediction ${idx+1} of 12</h2><div id="err" class="error"></div>${opponentReminder(name,t.type)}<p><strong>${name}</strong> is playing as <strong>${s.target_role}</strong>. What do you think ${name} will choose?</p>${payoffTables(s.players,s.target_role)}<p>Please assign a probability to each of ${name}'s choice options. Your probabilities must add up to <strong>100%</strong>.</p><div class="prob-grid">${s.choice_labels.map((lab,i)=>`<label><strong>${lab}</strong></label><div><input class="prob-input" type="number" min="0" max="100" step="0.1" id="p${i}" value="${prev?prev.probs[i]:''}" oninput="updateTotal()"> %</div>`).join('')}</div><div class="total-box">Total: <span id="prob-total">${prev?prev.probs.reduce((a,b)=>a+b,0):0}</span>%</div><p class="small">Take as much time as you need. No feedback will be provided during the prediction task.</p><div class="nav"><button class="btn secondary" onclick="backBelief()">Back</button><button class="btn" onclick="saveBelief(${idx})">Submit prediction</button></div></section>`}
+function updateTotal(){let total=[...document.querySelectorAll('.prob-input')].reduce((a,e)=>a+(Number(e.value||'0')||0),0);document.getElementById('prob-total').textContent=Number(total.toFixed(10))}
+async function saveBelief(idx){let t=state.trials[idx],s=scenarios[t.scenario],vals=[...document.querySelectorAll('.prob-input')].map(e=>e.value===''?null:Number(e.value));if(vals.some(v=>v===null)){showErr('Please assign a probability to every choice option.');return}if(vals.some(v=>v<0||v>100)){showErr('Each probability must be between 0% and 100%.');return}let sum=vals.reduce((a,b)=>a+b,0);if(Math.abs(sum-100)>1e-9){showErr(`Your probabilities currently sum to ${Number(sum.toFixed(10))}%. Please make them sum to 100%.`);return}state.answers[idx]={trial:idx+1,scenario:t.scenario,game_class:s.game_class,ring_id:s.ring_id,target_role:s.target_role,role_level:s.role_level,opponent_type:t.type,opponent_name:typeToName(t.type),choice_labels:s.choice_labels,probs:vals,sophisticated_choice:s.sophisticated_choice,max_choice:s.max_choice,timestamp:new Date().toISOString(),response_time_sec:(Date.now()-state.screen_entered_at)/1000};await saveCheckpoint('in_progress');next()}
+function showErr(msg){let e=document.getElementById('err');e.textContent=msg;e.style.display='block'}
+function backBelief(){if(state.screen>9)setScreen(state.screen-1);else setScreen(8)}
+
+function actualChoice(t){let s=scenarios[t.scenario];if(t.type==='max')return s.max_choice;let solves=t.type==='two_player'?['simple','large_options'].includes(s.game_class):['simple','multi_player'].includes(s.game_class);return solves?s.sophisticated_choice:s.choice_labels[Math.floor(Math.random()*s.choice_labels.length)]}
+function score(probs,labels,actual){let ps=probs.map(x=>x/100),y=labels.map(x=>x===actual?1:0),se=ps.reduce((a,p,i)=>a+(p-y[i])**2,0);return Math.max(0,Math.min(1,1-.5*se))}
+function computeBonus(){if(state.bonus||state.answers.length<12)return;let idx=Math.floor(Math.random()*12),ans=state.answers[idx],t=state.trials[idx],s=scenarios[t.scenario],actual=actualChoice(t),sc=score(ans.probs,s.choice_labels,actual),draw=Math.random(),won=draw<sc;state.bonus={selected_trial:idx+1,opponent_name:ans.opponent_name,opponent_type:ans.opponent_type,scenario:ans.scenario,target_role:s.target_role,actual_choice:actual,score:sc,random_draw:draw,won,amount:won?2:0}}
+function bonusScreen(){computeBonus();let b=state.bonus;return `<section class="screen active"><h2>Bonus result</h2><p>One of your 12 prediction questions was selected at random.</p><p>Selected prediction: <strong>#${b.selected_trial}</strong>. You predicted <strong>${b.opponent_name}</strong> playing <strong>${b.target_role}</strong>.</p><p>${b.opponent_name}'s realized choice option was <strong>${b.actual_choice}</strong>.</p><p>Your probability report produced a <strong>${(100*b.score).toFixed(1)}%</strong> chance of receiving the $2 bonus.</p><div class="note"><strong>${b.won?'You earned the additional $2 bonus.':'You did not receive the additional $2 bonus on the random bonus draw.'}</strong></div><p>Your base participation payment is handled separately through Prolific.</p><div class="nav"><span></span><button class="btn" onclick="finishParticipant()">Finish study</button></div></section>`}
+async function finishParticipant(){state.finished=new Date().toISOString();archiveRun();await saveAndRedirect('complete',SUCCESS_REDIRECT)}
+function finishScreen(){return `<section class="screen active"><h2>Thank you</h2><p>The study is complete.</p><p>You will now be returned to Prolific.</p>${DEBUG?`<div class="note"><strong>Researcher preview mode:</strong> participant-facing studies will not show any data-download controls. Use the debug panel to inspect or export test data.</div>`:''}</section>`}
+function failedScreen(){state.finished=new Date().toISOString();archiveRun();return `<section class="screen active"><h2>Thank you</h2><p>You have completed the instruction portion of the study.</p><p>You did not pass the comprehension check within two attempts, so the prediction task will not continue.</p><p>You are not eligible for the prediction bonus because you did not enter the prediction task.</p>${DEBUG?`<div class="note">Researcher preview mode: this is the early-completion path for failed comprehension.</div>`:''}</section>`}
+
+function mappingString(){return NAMES.map(n=>`${n}=${state.mapping[n]}`).join('; ')}
+function trialPlanString(){return state.trials.map((t,i)=>`${i+1}:${t.scenario}/${t.type}/${typeToName(t.type)}`).join(' | ')}
+function updateDebug(){const p=document.getElementById('debugPanel');if(!DEBUG){p.classList.remove('active');return}p.classList.add('active');p.innerHTML=`<h3>Researcher mode</h3><div><strong>Participant:</strong> ${state.participant_id}</div><div><strong>Mapping #:</strong> ${state.mapping_index}</div><div><strong>Mapping:</strong> ${mappingString()}</div><div><strong>Ring quiz:</strong> attempts=${state.ring_quiz_attempts}, passed=${state.ring_quiz_passed}</div><div><strong>Current screen:</strong> ${state.screen}</div><hr><strong>Randomized trial plan</strong><table><tr><th>#</th><th>Scenario</th><th>Role</th><th>Type</th><th>Name</th></tr>${state.trials.map((t,i)=>{let s=scenarios[t.scenario];return `<tr><td>${i+1}</td><td>${t.scenario}</td><td>${s.target_role}/${s.role_level}</td><td>${t.type}</td><td>${typeToName(t.type)}</td></tr>`}).join('')}</table>${state.bonus?`<hr><strong>Bonus</strong><div>${JSON.stringify(state.bonus)}</div>`:''}<div class="debug-actions"><button onclick="downloadTrialCSV()">Export current trials CSV</button><button onclick="downloadSummaryCSV()">Export current summary CSV</button><button onclick="downloadJSON()">Export current JSON</button><button onclick="downloadArchiveCSV()">Export archived runs CSV</button><button onclick="clearArchive()">Clear archive</button></div><p class="small">Protected researcher mode. Participants do not have access to this panel.</p>`}
+
+function csvEscape(v){if(v===null||v===undefined)return '';let s=String(v);return /[",\n]/.test(s)?`"${s.replaceAll('"','""')}"`:s}
+function toCSV(rows){if(!rows.length)return '';let keys=[...new Set(rows.flatMap(r=>Object.keys(r)))];return [keys.join(','),...rows.map(r=>keys.map(k=>csvEscape(r[k])).join(','))].join('\n')}
+function currentTrialRows(){return state.trials.map((t,i)=>{let s=scenarios[t.scenario],a=state.answers[i]||{},row={participant_id:state.participant_id,prolific_pid:state.prolific_pid,study_id:state.study_id,session_id:state.session_id,mapping_index:state.mapping_index,navi_type:state.mapping.Navi,rilo_type:state.mapping.Rilo,toma_type:state.mapping.Toma,trial_order:i+1,scenario:t.scenario,game_class:s.game_class,ring_id:s.ring_id,target_role:s.target_role,role_level:s.role_level,opponent_type:t.type,opponent_name:typeToName(t.type),sophisticated_choice:s.sophisticated_choice,max_choice:s.max_choice,choice_labels:s.choice_labels.join('|'),response_time_sec:a.response_time_sec??''};s.choice_labels.forEach((lab,j)=>row[`p_${lab}`]=a.probs?a.probs[j]:'');if(state.bonus&&state.bonus.selected_trial===i+1){row.bonus_selected=1;row.realized_choice=state.bonus.actual_choice;row.score=state.bonus.score;row.random_draw=state.bonus.random_draw;row.bonus_won=state.bonus.won?1:0;row.bonus_amount=state.bonus.amount}else row.bonus_selected=0;return row})}
+function currentSummaryRow(){return {participant_id:state.participant_id,prolific_pid:state.prolific_pid,started:state.started,finished:state.finished||'',mapping_index:state.mapping_index,navi_type:state.mapping.Navi,rilo_type:state.mapping.Rilo,toma_type:state.mapping.Toma,ring_quiz_attempts:state.ring_quiz_attempts,ring_quiz_passed:state.ring_quiz_passed?1:0,failed_comprehension:state.failed_comprehension?1:0,opponent_quiz_attempts:state.opponent_quiz_attempts,predictions_completed:state.answers.length,bonus_selected_trial:state.bonus?.selected_trial??'',bonus_score:state.bonus?.score??'',bonus_won:state.bonus?.won?1:0,bonus_amount:state.bonus?.amount??'',trial_plan:trialPlanString(),screen_times_json:JSON.stringify(state.screen_times),ring_quiz_history_json:JSON.stringify(state.ring_quiz_history),opponent_quiz_history_json:JSON.stringify(state.opponent_quiz_history)}}
+function downloadText(text,filename,type='text/plain'){let blob=new Blob([text],{type}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500)}
+function downloadTrialCSV(){downloadText(toCSV(currentTrialRows()),`ringgame_${state.participant_id}_trials.csv`,'text/csv')}
+function downloadSummaryCSV(){downloadText(toCSV([currentSummaryRow()]),`ringgame_${state.participant_id}_summary.csv`,'text/csv')}
+function downloadJSON(){downloadText(JSON.stringify(state,null,2),`ringgame_${state.participant_id}.json`,'application/json')}
+function archiveRun(){try{let arr=JSON.parse(localStorage.getItem('ringgame_debug_archive')||'[]');if(!arr.some(x=>x.summary.participant_id===state.participant_id)){arr.push({summary:currentSummaryRow(),trials:currentTrialRows()});localStorage.setItem('ringgame_debug_archive',JSON.stringify(arr))}}catch(e){}}
+function downloadArchiveCSV(){let arr=[];try{arr=JSON.parse(localStorage.getItem('ringgame_debug_archive')||'[]')}catch(e){};let rows=arr.flatMap(x=>x.trials||[]);if(!rows.length){alert('No completed runs are archived in this browser yet.');return}downloadText(toCSV(rows),'ringgame_debug_archive_trials.csv','text/csv')}
+function clearArchive(){localStorage.removeItem('ringgame_debug_archive');alert('Debug archive cleared.')}
+
+state.mapping=chooseMapping();
+state.trials=makeTrials();
+const params=new URLSearchParams(location.search);state.prolific_pid=params.get('PROLIFIC_PID')||'';state.study_id=params.get('STUDY_ID')||'';state.session_id=params.get('SESSION_ID')||'';
+render();
+saveCheckpoint('started');
+</script>
+</body>
+</html>
